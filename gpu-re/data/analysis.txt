@@ -1,0 +1,133 @@
+1. FRAMING
+  134 of 134 kernels end with 0e 00 00 00
+  the empty kernel is exactly: 0e 00 00 00
+  first 4 bytes 1c a0 10 06: 129 kernels (e.g. add, sub, rsub, mul)
+  first 4 bytes 0c a0 10 06: 4 kernels (e.g. store_id, select, branch, loop)
+  first 4 bytes 0e 00 00 00: 1 kernels (e.g. empty)
+  kernels whose source reads a buffer: 81; containing 41 00 80 00 00 00: 81
+    reads but lacks it: none
+    has it but does not read: none
+  constant program (padding of 06 00 removed):
+    23 00 07 02 42 20 a0 02 0e                81 kernels, 81 of them read a buffer
+    0e                                        53 kernels, 0 of them read a buffer
+
+2. BUFFER SLOTS
+  add  (a[id] + b[id]) vs rsub (b[id] - a[id]) share their two load instructions;
+  the loads differ only at: byte 5 (00 vs 04), byte 13 (04 vs 00)
+  copy_a and copy_b compile to identical code: True
+  so the byte after 0f/1f/2f/3f selects among bindings in steps of 4, numbered
+  by order of use, and which Metal buffer that is must be recorded outside the code.
+
+3. IMMEDIATES
+  o[id] = K: 9 constants give 18 bytes, 39 give 24 bytes
+    largest 18-byte K: 0x7f; smallest 24-byte K: 0x80
+
+  3a. short constant move (18-byte kernels)
+  trained on 7 samples, 18 bytes each
+    value bit  0 -> byte 5 bit 0
+    value bit  1 -> byte 5 bit 1
+    value bit  2 -> byte 5 bit 2
+    value bit  3 -> byte 5 bit 3
+    value bit  4 -> byte 5 bit 4
+    value bit  5 -> byte 5 bit 5
+    value bit  6 -> byte 5 bit 6
+  held-out predictions correct: 2 of 2
+
+  3b. 32-bit constant move (24-byte kernels)
+  trained on 32 samples, 24 bytes each
+    value bit  0 -> byte 5 bit 0
+    value bit  1 -> byte 5 bit 1
+    value bit  2 -> byte 5 bit 2
+    value bit  3 -> byte 5 bit 3
+    value bit  4 -> byte 5 bit 4
+    value bit  5 -> byte 5 bit 5
+    value bit  6 -> byte 5 bit 6
+    value bit  7 -> byte 8 bit 1
+    value bit  8 -> byte 8 bit 2
+    value bit  9 -> byte 8 bit 3
+    value bit 10 -> byte 8 bit 4
+    value bit 11 -> byte 9 bit 2
+    value bit 12 -> byte 9 bit 3
+    value bit 13 -> byte 10 bit 0
+    value bit 14 -> byte 10 bit 1
+    value bit 15 -> byte 10 bit 2
+    value bit 16 -> byte 10 bit 3
+    value bit 17 -> byte 10 bit 4
+    value bit 18 -> byte 10 bit 5
+    value bit 19 -> byte 10 bit 6
+    value bit 20 -> byte 10 bit 7
+    value bit 21 -> byte 11 bit 0
+    value bit 22 -> byte 11 bit 1
+    value bit 23 -> byte 11 bit 2
+    value bit 24 -> byte 11 bit 3
+    value bit 25 -> byte 7 bit 1
+    value bit 26 -> byte 7 bit 2
+    value bit 27 -> byte 7 bit 3
+    value bit 28 -> byte 7 bit 4
+    value bit 29 -> byte 7 bit 5
+    value bit 30 -> byte 7 bit 6
+    value bit 31 -> byte 7 bit 7
+  held-out predictions correct: 7 of 7
+
+  3c. a[id] + K with K < 256, immediate inside the add instruction
+  trained on 8 samples, 42 bytes each
+    value bit  0 -> byte 19 bit 0
+    value bit  1 -> byte 19 bit 1
+    value bit  2 -> byte 21 bit 5
+    value bit  3 -> byte 21 bit 6
+    value bit  4 -> byte 21 bit 7
+    value bit  5 -> byte 23 bit 7
+    value bit  6 -> byte 26 bit 0
+    value bit  7 -> byte 26 bit 1
+  held-out predictions correct: 8 of 8
+
+  3d. a[id] + K with K >= 256: 27 constants give only 3 distinct code sequences
+    18 constants, e.g. 0x100, 0x200, 0x400, 0x800, 0x100000
+       2f 00 04 1a 21 00 a3 02 28 82 03 00
+     8 constants, e.g. 0x1000, 0x2000, 0x4000, 0x8000, 0x10000
+       2f 00 04 1a 21 00 a3 02 28 02 02 00
+     1 constants, e.g. 0x80000000
+       2b 00 06 80 32 38 a1 02 04 82
+    The constant is therefore not in the code. Where its bytes appear in the archive:
+      0x12345678: __GPU_METADATA +0x114
+      0x00abcdef: __GPU_METADATA +0x114
+
+4. BITWISE OPERATIONS
+  truth table bit (2*a + b) = f(a, b); code bytes 26..35 of each kernel:
+    0001  nor     2b 00 06 80 31 70 a4 02 04 80
+    0010  nand_b  2b 00 06 80 32 70 a4 02 04 80
+    0100  andn    2b 00 06 80 32 30 a4 02 04 81
+    0110  xor     2b 00 06 80 32 78 a4 02 04 80
+    0111  nand    2b 00 06 80 33 78 a4 02 04 80
+    1000  and     2b 00 07 80 30 70 a4 02 04 80
+    1001  xnor    2b 00 07 80 31 30 a4 02 04 81
+    1011  norn    2b 00 07 80 33 70 a4 02 04 80
+    1101  orn     2b 00 07 80 33 30 a4 02 04 81
+    1110  or      2b 00 07 80 32 78 a4 02 04 80
+  raw fit over all ten functions:
+    value bit  0 -> byte 30 bit 0
+    value bit  1: NO code bit tracks it
+    value bit  2: NO code bit tracks it
+    value bit  3 -> byte 28 bit 0
+    unexplained varying bits: byte 30 bit 1, byte 31 bit 3, byte 31 bit 6, byte 35 bit 0
+  refit assuming the operands are exchanged whenever byte 31 bit 6 flips
+  (it flips for: andn, orn, xnor):
+    value bit  0 -> byte 30 bit 0
+    value bit  1 -> byte 30 bit 1
+    value bit  2 -> byte 31 bit 3
+    value bit  3 -> byte 28 bit 0
+    still unexplained: byte 31 bit 6, byte 35 bit 0
+    All four truth-table bits then fit all ten functions. The bits still
+    unexplained flip together with the marker, as two operand fields
+    trading places would.
+
+5. ARITHMETIC (bytes between the loads and the store)
+    add   2f 00 04 3a 21 00 a3 02 28 80 21 00
+    sub   2f 00 04 1a 25 00 a2 02 08 81 21 00
+    mul   2f 00 04 3a 21 00 a1 02 28 80 20 00 01 02
+    add3  2f 00 04 3a 21 00 a3 02 28 80 24 00
+    fadd  29 00 04 1a 22 20 a0 02 04 08 12 00
+    fsub  29 00 24 0a 22 20 a0 02 06 08 12 00
+    fmul  29 00 05 30 22 80 a0 02 1c 00 20 00 00 10
+    fma   29 00 07 0a 20 20 a3 02 38 01 a0 00 00 08 00 80
+  add vs sub differ at: byte 29 (3a vs 1a), byte 30 (21 vs 25), byte 32 (a3 vs a2), byte 34 (28 vs 08), byte 35 (80 vs 81)

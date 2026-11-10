@@ -1,0 +1,76 @@
+diff --git a/Makefile b/Makefile
+index 336edc94..4ca3fa24 100644
+--- a/Makefile
++++ b/Makefile
+@@ -206,6 +206,12 @@ FP_OBJECTS := \
+ 	math/powf.o \
+ 	math/powf_data.o
+ 
++# m5-baremetal: optional out-of-tree runtime linked into m1n1.
++# RT_DIR must be an absolute path to a directory containing rt.mk.
++ifneq ($(RT_DIR),)
++include $(RT_DIR)/rt.mk
++endif
++
+ BUILD_OBJS := $(patsubst %,build/%,$(OBJECTS))
+ BUILD_FP_OBJS := $(patsubst %,build/%,$(FP_OBJECTS))
+ BUILD_RUST_LIB := $(patsubst %,build/%,$(RUST_LIB))
+diff --git a/src/main.c b/src/main.c
+index d0fe5088..877adc61 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -35,6 +35,10 @@
+ 
+ struct vector_args next_stage;
+ 
++#ifdef RT_RUNTIME
++void rt_main(void);
++#endif
++
+ const char version_tag[] = "##m1n1_ver##" BUILD_TAG;
+ const char *const m1n1_version = version_tag + 12;
+ 
+@@ -189,6 +193,12 @@ void m1n1_main(void)
+ 
+     printf("Initialization complete.\n");
+ 
++#ifdef RT_RUNTIME
++    // m5-baremetal: hand control to the linked-in runtime. It normally does
++    // not return (it reboots); if it does, m1n1 carries on as usual.
++    rt_main();
++#endif
++
+     run_actions(lp_sip0);
+ 
+     if (!next_stage.entry) {
+diff --git a/src/utils.c b/src/utils.c
+index f2cc2635..300dbea8 100644
+--- a/src/utils.c
++++ b/src/utils.c
+@@ -1,5 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0-or-later */
+ 
++#include "../build/build_cfg.h"
++
+ #include <assert.h>
+ #include <stdarg.h>
+ 
+@@ -126,9 +128,18 @@ bool timeout_expired(u64 timeout)
+     return expired;
+ }
+ 
++#ifdef RT_RUNTIME
++void rt_fatal_hold(void);
++#endif
++
+ void flush_and_reboot(void)
+ {
+     iodev_console_flush();
++#ifdef RT_RUNTIME
++    // m5-baremetal: keep the panic / exception dump on screen long enough to
++    // photograph before the machine resets.
++    rt_fatal_hold();
++#endif
+     reboot();
+ }
+ 
